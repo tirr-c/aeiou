@@ -157,14 +157,44 @@ export async function generateCatalog(filenames: string[], workingDirectory: str
         const sourceCode = await readFileAsync(path.join(workingDirectory, filename), 'utf8') as string;
         console.info(`extarcting messages from ${ filename }`);
         const extractor = isTypescript ? tsExtractor : jsExtractor;
-        for (let [line, column, msgid, msgid_plural, msgctxt] of extract(sourceCode, filename, extractor)) {
-            catalog.add(filename, line + 1, column + 1, msgid, msgid_plural, msgctxt);
+        for (const extractResult of extract(sourceCode, filename, extractor)) {
+            const { line, column } = extractResult;
+            switch (extractResult.type) {
+                case 'successful': {
+                    const { msgid, msgid_plural, msgctxt } = extractResult;
+                    catalog.add(filename, line + 1, column + 1, msgid, msgid_plural, msgctxt);
+                    break;
+                }
+                case 'warning': {
+                    const { message } = extractResult;
+                    console.warn('%s:%d:%d: %s', filename, line + 1, column + 1, message);
+                    break;
+                }
+            }
         }
     }
     return catalog;
 }
 
-type ExtractResult = [ number, number, string, (string | null), (string | null) ];
+interface ExtractResultBase {
+    type: string;
+    // zero based
+    line: number;
+    column: number;
+}
+interface ExtractResultSuccessful extends ExtractResultBase {
+    type: 'successful';
+    msgid: string;
+    msgid_plural: string | null;
+    msgctxt: string | null;
+}
+interface ExtractResultWarning extends ExtractResultBase {
+    type: 'warning';
+    message: string;
+}
+type ExtractResult
+    = ExtractResultSuccessful
+    | ExtractResultWarning;
 
 interface SourceLocation {
     // zero based
@@ -207,15 +237,22 @@ function *extract(
             msgctxt?: string | null;
         } = zipObject(spec as any, args);
         if (!msg.msgid) {
-            continue;
+            yield {
+                type: 'warning',
+                line,
+                column,
+                message: 'Argument is not a string literal.',
+            };
+        } else {
+            yield {
+                type: 'successful',
+                line,
+                column,
+                msgid: msg.msgid,
+                msgid_plural: msg.msgid_plural || null,
+                msgctxt: msg.msgctxt || null,
+            };
         }
-        yield [
-            line,
-            column,
-            msg.msgid,
-            msg.msgid_plural || null,
-            msg.msgctxt || null,
-        ];
     }
 }
 
